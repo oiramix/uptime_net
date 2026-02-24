@@ -48,6 +48,12 @@ class Target(Base):
 
 class Job(Base):
     __tablename__ = "jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "target_id", "region_id", "check_type", "window_start", "seq_index",
+            name="uq_jobs_window_slot",
+        ),
+    )
 
     job_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     target_id: Mapped[str] = mapped_column(String(32), ForeignKey("targets.target_id"), index=True)
@@ -60,6 +66,8 @@ class Job(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     server_sig_b64: Mapped[str] = mapped_column(String(128))
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    seq_index: Mapped[int] = mapped_column(Integer, nullable=False)
 
     target = relationship("Target")
 
