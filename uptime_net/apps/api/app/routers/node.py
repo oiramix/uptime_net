@@ -141,37 +141,75 @@ def submit_receipt(
     settings: Settings = Depends(get_settings_cached),
 ):
     if receipt.node_id != node.node_id:
-        raise HTTPException(status_code=400, detail="node_id mismatch")
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "node_id_mismatch", "message": "node_id does not match authenticated node"},
+        )
 
     job = db.query(Job).filter(Job.job_id == receipt.job_id).one_or_none()
     if not job:
-        raise HTTPException(status_code=404, detail="job not found")
+        raise HTTPException(
+            status_code=404,
+            detail={"reason_code": "job_not_found", "message": "job_id not found"},
+        )
     if job.node_id != node.node_id:
-        raise HTTPException(status_code=403, detail="job not assigned to this node")
+        raise HTTPException(
+            status_code=403,
+            detail={"reason_code": "job_not_assigned", "message": "job is not assigned to this node"},
+        )
     if receipt.nonce != job.nonce:
-        raise HTTPException(status_code=400, detail="nonce mismatch")
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "nonce_mismatch", "message": "nonce does not match job"},
+        )
 
     started_at = _parse_ts(receipt.started_at)
     finished_at = _parse_ts(receipt.finished_at)
     if finished_at < started_at:
-        raise HTTPException(status_code=400, detail="finished_at < started_at")
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "finished_before_started", "message": "finished_at is before started_at"},
+        )
 
-    # TTL: start must be <= expires_at
-    if started_at > job.expires_at:
-        raise HTTPException(status_code=400, detail="started_at after expires_at")
+    # TTL and assignment checks:
+    # - require job was claimed server-side
+    # - reject if claim happened after expiry
+    # - accept receipt if it arrives within a small grace window after expiry
+    if job.claimed_at is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "job_not_claimed", "message": "job has not been claimed by any node"},
+        )
+    if job.claimed_at > job.expires_at:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "job_claim_after_expiry", "message": "job was claimed after expiry"},
+        )
+    now = datetime.utcnow()
+    if now > job.expires_at + timedelta(seconds=60):
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "receipt_too_late", "message": "receipt arrived after allowed grace window"},
+        )
 
     # Timeout: finished-start must be <= timeout_ms
     timeout_ms = int(_get_timeout_ms(job.params_json, settings.http_total_timeout_ms))
     dur_ms = int((finished_at - started_at).total_seconds() * 1000)
-    if dur_ms > timeout_ms:
-        raise HTTPException(status_code=400, detail="receipt duration exceeds timeout")
+    if dur_ms > timeout_ms + 500:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "duration_exceeded", "message": "receipt duration exceeds timeout"},
+        )
 
     # Verify signature
     receipt_dict = receipt.model_dump()
     unsigned = strip_keys_deep(receipt_dict, keys=["node_sig"])
     msg = canonical_dumps(unsigned)
     if not verify_bytes(node.pubkey_b64, msg, receipt.node_sig):
-        raise HTTPException(status_code=400, detail="invalid node_sig")
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "invalid_signature", "message": "node_sig could not be verified"},
+        )
 
     # Store
     r = Receipt(
@@ -189,7 +227,10 @@ def submit_receipt(
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=409, detail="receipt already submitted")
+        raise HTTPException(
+            status_code=409,
+            detail={"reason_code": "duplicate_receipt", "message": "receipt already submitted for this job_id"},
+        )
 
     node.last_seen_at = datetime.utcnow()
     db.commit()
@@ -203,7 +244,10 @@ def _parse_ts(s: str) -> datetime:
     try:
         return datetime.fromisoformat(s)
     except Exception:
-        raise HTTPException(status_code=400, detail="invalid timestamp")
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "invalid_timestamp", "message": "timestamp format is invalid"},
+        )
 
 
 def _get_timeout_ms(params_json: str, default_ms: int) -> int:

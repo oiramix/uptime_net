@@ -43,22 +43,47 @@ class ReceiptView:
     ttfb_ms: int | None
 
 
-def load_unaggregated_receipts(session) -> List[ReceiptView]:
-    # For MVP, take receipts from the last hour and aggregate if no VerifiedResult exists yet.
-    now = datetime.utcnow()
-    one_hour_ago = now - timedelta(hours=1)
+def debug_print_recent_receipts(session) -> None:
+    # Print the last 10 receipts with joined job/target info
+    stmt = (
+        select(Receipt, Job, Target)
+        .join(Job, Receipt.job_id == Job.job_id)
+        .join(Target, Job.target_id == Target.target_id)
+        .order_by(Receipt.started_at.desc())
+        .limit(10)
+    )
+    rows = session.execute(stmt).all()
+    print("[verifier] last receipts:")
+    for receipt, job, target in rows:
+        print(
+            "[verifier] receipt",
+            "job_id=", receipt.job_id,
+            "target_id=", job.target_id,
+            "region_id=", job.region_id,
+            "check_type=", job.check_type,
+            "started_at=", receipt.started_at,
+            "accepted=", receipt.accepted,
+        )
 
+
+def load_unaggregated_receipts(session) -> List[ReceiptView]:
+    # Debug: how many receipts exist at all?
+    total_receipts = session.query(Receipt).count()
+    print(f"[verifier] total receipts in DB = {total_receipts}")
+
+    # For MVP, aggregate over all receipts (no time filter) to avoid missing data
     stmt = (
         select(Receipt, Job, Target)
         .join(Job, Receipt.job_id == Job.job_id)
         .join(Target, Job.target_id == Target.target_id)
         .where(Receipt.accepted.is_(True))
-        .where(Receipt.started_at >= one_hour_ago)
+        .where(Job.check_type == "http")
     )
-    rows = session.execute(stmt).all()
+    joined_rows = session.execute(stmt).all()
+    print(f"[verifier] receipts joined with jobs+targets = {len(joined_rows)}")
 
     out: List[ReceiptView] = []
-    for receipt, job, target in rows:
+    for receipt, job, target in joined_rows:
         try:
             payload = json.loads(receipt.receipt_json)
         except json.JSONDecodeError:
@@ -69,7 +94,19 @@ def load_unaggregated_receipts(session) -> List[ReceiptView]:
         total_ms = int(timings.get("total") or 0)
         ttfb_ms = timings.get("ttfb")
         ttfb_val: int | None = int(ttfb_ms) if ttfb_ms is not None else None
-        window = floor_window_start(receipt.started_at, target.interval_s or 60)
+
+        # Window calculation: floor started_at (or finished_at) to 60s window.
+        ts_source = receipt.started_at or receipt.finished_at
+        window = floor_window_start(ts_source, 60)
+        print(
+            "[verifier] computed window",
+            "job_id=", receipt.job_id,
+            "target_id=", job.target_id,
+            "region_id=", job.region_id,
+            "check_type=", job.check_type,
+            "started_at=", receipt.started_at,
+            "window_start=", window,
+        )
 
         out.append(
             ReceiptView(
@@ -99,6 +136,13 @@ def ensure_verified_result(session, group_key: Tuple[str, str, str, datetime], v
         .one_or_none()
     )
     if existing:
+        print(
+            "[verifier] VerifiedResult already exists for",
+            "target_id=", target_id,
+            "region_id=", region_id,
+            "check_type=", check_type,
+            "window_start=", window_start,
+        )
         return None
 
     oks = [v.ok for v in views]
@@ -124,6 +168,15 @@ def ensure_verified_result(session, group_key: Tuple[str, str, str, datetime], v
     )
     session.add(vr)
     session.flush()
+    print(
+        "[verifier] Inserted VerifiedResult for",
+        "target_id=", target_id,
+        "region_id=", region_id,
+        "check_type=", check_type,
+        "window_start=", window_start,
+        "ok=", ok_majority,
+        "total_ms_median=", total_median,
+    )
     return vr
 
 
@@ -213,6 +266,7 @@ def run_once():
     SessionLocal = make_session_factory(engine)
 
     with SessionLocal() as session:
+        debug_print_recent_receipts(session)
         views = load_unaggregated_receipts(session)
         if not views:
             print("No receipts to aggregate.")
@@ -223,18 +277,34 @@ def run_once():
             key = (v.target_id, v.region_id, v.check_type, v.window_start)
             grouped[key].append(v)
 
+        print("[verifier] groups to consider:")
+        for key, gv in sorted(grouped.items(), key=lambda kv: kv[0][3]):
+            target_id, region_id, check_type, window_start = key
+            print(
+                "[verifier] group",
+                "target_id=", target_id,
+                "region_id=", region_id,
+                "check_type=", check_type,
+                "window_start=", window_start,
+                "count=", len(gv),
+            )
+
         created = 0
         for key, gv in sorted(grouped.items(), key=lambda kv: kv[0][3]):
-            vr = ensure_verified_result(session, key, gv)
-            if vr is None:
-                continue
+            try:
+                vr = ensure_verified_result(session, key, gv)
+                if vr is None:
+                    continue
 
-            target = session.query(Target).filter(Target.target_id == vr.target_id).one()
-            maybe_open_or_close_incident(session, vr, target)
-            created += 1
+                target = session.query(Target).filter(Target.target_id == vr.target_id).one()
+                maybe_open_or_close_incident(session, vr, target)
+                session.commit()
+                created += 1
+            except Exception as exc:
+                session.rollback()
+                print("[verifier] ERROR while inserting VerifiedResult for key", key, "exc=", repr(exc))
 
-        session.commit()
-        print(f"Created {created} verified results.")
+        print(f"[verifier] Created {created} verified results.")
 
 
 def main():

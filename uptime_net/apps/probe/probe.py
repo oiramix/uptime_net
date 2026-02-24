@@ -137,13 +137,21 @@ def run_http_check(url: str, method: str, timeout_ms: int) -> Dict[str, Any]:
 def loop(st: State):
     headers = {"Authorization": f"Bearer {st.token}"}
 
+    sleep_s = 2
+
     while True:
         r = httpx.get(f"{st.api_base}/v1/node/jobs", params={"limit": 1}, headers=headers, timeout=10)
         r.raise_for_status()
         jobs = r.json().get("jobs", [])
         if not jobs:
-            time.sleep(1)
+            # Backoff when no jobs are available, up to 30s.
+            print(f"No jobs available, sleeping {sleep_s}s")
+            time.sleep(sleep_s)
+            sleep_s = min(sleep_s * 2, 30)
             continue
+
+        # Reset backoff when we successfully get a job.
+        sleep_s = 2
 
         job = jobs[0]
         if not verify_server_sig(job):
@@ -172,7 +180,11 @@ def loop(st: State):
 
         rr = httpx.post(f"{st.api_base}/v1/node/receipts", json=receipt, headers=headers, timeout=10)
         if rr.status_code >= 400:
-            print("Receipt rejected:", rr.status_code, rr.text)
+            try:
+                err = rr.json()
+            except Exception:
+                err = rr.text
+            print("Receipt rejected:", rr.status_code, err)
         else:
             print("Receipt accepted for job", job["job_id"], "ok=", receipt["result"]["ok"], "total_ms=", receipt["timings_ms"]["total"])
 
