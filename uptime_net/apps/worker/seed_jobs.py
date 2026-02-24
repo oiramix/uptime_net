@@ -17,6 +17,15 @@ from app.db import make_engine, make_session_factory
 from app.models import Target, Job
 
 
+def delete_expired_unclaimed_jobs(db) -> int:
+    """Delete jobs that are unclaimed and past expires_at. Returns count deleted."""
+    deleted = db.query(Job).filter(
+        Job.node_id.is_(None),
+        Job.expires_at < datetime.utcnow(),
+    ).delete()
+    return deleted
+
+
 def floor_window_start(dt: datetime, window_s: int = 60) -> datetime:
     ts = int(dt.timestamp())
     start = (ts // window_s) * window_s
@@ -30,6 +39,12 @@ def main():
     server_sk = get_or_create_server_sk_b64()
 
     with SessionLocal() as db:
+        # Optional cleanup: delete expired unclaimed jobs
+        n = delete_expired_unclaimed_jobs(db)
+        if n:
+            db.commit()
+            print(f"Deleted {n} expired unclaimed job(s).")
+
         # Ensure at least one target exists
         t = db.execute(select(Target).limit(1)).scalars().first()
         if not t:
@@ -77,7 +92,7 @@ def main():
                     "check_type": "http",
                     "params": {
                         "url": target.url,
-                        "method": "HEAD",
+                        "method": "GET",
                         "expected_status": [200, 204, 301, 302],
                         "timeout_ms": settings.http_total_timeout_ms,
                     },

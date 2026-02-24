@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -98,6 +98,8 @@ def fetch_jobs(
     out: List[JobOut] = []
     now = datetime.utcnow()
     for job in rows:
+        if job.expires_at <= now:
+            continue
         job.node_id = node.node_id
         job.claimed_at = now
         out.append(
@@ -239,11 +241,14 @@ def submit_receipt(
 
 
 def _parse_ts(s: str) -> datetime:
-    # Expect RFC3339 with Z
+    # Expect RFC3339 with Z (UTC). Parse as UTC and return naive UTC for consistent storage.
     if s.endswith("Z"):
-        s = s[:-1]
+        s = s[:-1] + "+00:00"
     try:
-        return datetime.fromisoformat(s)
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
     except Exception:
         raise HTTPException(
             status_code=400,

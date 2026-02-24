@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Dict, List, Tuple
 
@@ -24,9 +24,12 @@ from app.models import (
 
 
 def floor_window_start(dt: datetime, window_s: int = 60) -> datetime:
+    """Floor to window boundary in UTC. Naive datetimes are treated as UTC."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
     ts = int(dt.timestamp())
     start = (ts // window_s) * window_s
-    return datetime.utcfromtimestamp(start)
+    return datetime.fromtimestamp(start, tz=timezone.utc).replace(tzinfo=None)
 
 
 @dataclass
@@ -309,5 +312,11 @@ def main():
 
 
 if __name__ == "__main__":
+    # Sanity: naive 14:42:34 treated as UTC must floor to 14:42:00 (not 12:42)
+    _t = datetime(2026, 2, 24, 14, 42, 34)
+    _got = floor_window_start(_t, 60)
+    assert _got == datetime(2026, 2, 24, 14, 42, 0), (
+        f"window_start UTC bug: expected 2026-02-24 14:42:00, got {_got!r}"
+    )
     main()
 

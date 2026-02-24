@@ -95,8 +95,10 @@ def run_http_check(url: str, method: str, timeout_ms: int) -> Dict[str, Any]:
             resp = client.request(method=method, url=url)
             status = int(resp.status_code)
             hdr_hash = headers_hash(resp.headers)
-            ok = status in (200, 204, 301, 302)
-            if not ok:
+            if status is not None and 200 <= status < 400:
+                ok = True
+            else:
+                ok = False
                 reason = "HTTP_BAD_STATUS"
     except httpx.TimeoutException:
         reason = "TIMEOUT"
