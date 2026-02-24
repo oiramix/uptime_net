@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from .routers import node as node_router
 from .routers import status as status_router
+from .routers import targets as targets_router
 
 app = FastAPI(title="uptime_net API", version="0.1.0")
 
@@ -15,3 +16,4 @@ def healthz():
 
 app.include_router(node_router.router)
 app.include_router(status_router.router)
+app.include_router(targets_router.router)

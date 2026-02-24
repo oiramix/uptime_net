@@ -38,7 +38,14 @@ def main():
         # Ensure at least one target exists
         t = db.execute(select(Target).limit(1)).scalars().first()
         if not t:
-            t = Target(target_id=gen_id("t"), url="https://example.com", interval_s=60, check_http=True, check_tls=True)
+            t = Target(
+                target_id=gen_id("t"),
+                url="https://example.com",
+                interval_s=60,
+                latency_threshold_ms=2000,
+                check_http=True,
+                check_tls=True,
+            )
             db.add(t)
             db.commit()
             print(f"Created demo target {t.target_id} -> {t.url}")
@@ -48,11 +55,27 @@ def main():
         issued_at = now
         expires_at = issued_at + timedelta(seconds=settings.job_ttl_seconds)
 
-        # Create K_normal jobs for each target
+        # Create K_normal jobs for each target for this window (idempotent)
         targets = db.execute(select(Target)).scalars().all()
         created = 0
         for target in targets:
-            for _ in range(settings.k_normal):
+            # Check how many jobs already exist for this target/window/check_type/region
+            existing_count = (
+                db.query(Job)
+                .filter(
+                    Job.target_id == target.target_id,
+                    Job.region_id == settings.default_region_id,
+                    Job.check_type == "http",
+                    Job.issued_at >= window_start,
+                    Job.issued_at < window_start + timedelta(seconds=target.interval_s or 60),
+                )
+                .count()
+            )
+            to_create = max(0, settings.k_normal - existing_count)
+            if to_create == 0:
+                continue
+
+            for _ in range(to_create):
                 job_payload = {
                     "job_id": gen_id("j"),
                     "target_id": target.target_id,
