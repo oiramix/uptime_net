@@ -39,6 +39,7 @@ class Target(Base):
     target_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     url: Mapped[str] = mapped_column(Text)
     interval_s: Mapped[int] = mapped_column(Integer, default=60)
+    latency_threshold_ms: Mapped[int] = mapped_column(Integer, default=2000)
     check_http: Mapped[bool] = mapped_column(Boolean, default=True)
     check_tls: Mapped[bool] = mapped_column(Boolean, default=True)
     check_dns: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -80,3 +81,35 @@ class Receipt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     job = relationship("Job")
+
+
+class VerifiedResult(Base):
+    __tablename__ = "verified_results"
+
+    verified_result_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    target_id: Mapped[str] = mapped_column(String(32), ForeignKey("targets.target_id"), index=True)
+    region_id: Mapped[str] = mapped_column(String(32), index=True)
+    check_type: Mapped[str] = mapped_column(String(8), index=True)  # http|dns|tls
+    window_start: Mapped[datetime] = mapped_column(DateTime, index=True)
+    ok: Mapped[bool] = mapped_column(Boolean)
+    total_ms_median: Mapped[int] = mapped_column(Integer)
+    ttfb_ms_median: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    target = relationship("Target")
+
+
+class Incident(Base):
+    __tablename__ = "incidents"
+
+    incident_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    target_id: Mapped[str] = mapped_column(String(32), ForeignKey("targets.target_id"), index=True)
+    region_id: Mapped[str] = mapped_column(String(32), index=True)
+    check_type: Mapped[str] = mapped_column(String(8), index=True)  # http|dns|tls
+    status: Mapped[str] = mapped_column(String(16), index=True)  # open|closed
+    cause: Mapped[str] = mapped_column(String(32))  # down|latency_spike|dns|tls
+    opened_at: Mapped[datetime] = mapped_column(DateTime)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    target = relationship("Target")

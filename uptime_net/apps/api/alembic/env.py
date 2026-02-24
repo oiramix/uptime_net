@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import os
 from logging.config import fileConfig
+from pathlib import Path
+import sys
 
 from sqlalchemy import engine_from_config, pool
 from alembic import context
+
+# Ensure the app package is importable without manually setting PYTHONPATH.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.db import Base
 from app import models  # noqa: F401  (import models for metadata)
