@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict
+from collections import defaultdict, Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from statistics import median
@@ -41,6 +41,8 @@ class ReceiptView:
     ok: bool
     total_ms: int
     ttfb_ms: int | None
+    reason_code: str | None
+    http_status: int | None
 
 
 def debug_print_recent_receipts(session) -> None:
@@ -94,6 +96,8 @@ def load_unaggregated_receipts(session) -> List[ReceiptView]:
         total_ms = int(timings.get("total") or 0)
         ttfb_ms = timings.get("ttfb")
         ttfb_val: int | None = int(ttfb_ms) if ttfb_ms is not None else None
+        reason_code = result.get("reason_code")
+        http_status = result.get("http_status")
 
         # Window calculation: floor started_at (or finished_at) to 60s window.
         ts_source = receipt.started_at or receipt.finished_at
@@ -117,6 +121,8 @@ def load_unaggregated_receipts(session) -> List[ReceiptView]:
                 ok=ok,
                 total_ms=total_ms,
                 ttfb_ms=ttfb_val,
+                reason_code=reason_code,
+                http_status=int(http_status) if http_status is not None else None,
             )
         )
     return out
@@ -148,6 +154,8 @@ def ensure_verified_result(session, group_key: Tuple[str, str, str, datetime], v
     oks = [v.ok for v in views]
     total_vals = [v.total_ms for v in views if v.total_ms is not None]
     ttfb_vals = [v.ttfb_ms for v in views if v.ttfb_ms is not None]
+    reason_vals = [v.reason_code for v in views if v.reason_code]
+    status_vals = [v.http_status for v in views if v.http_status is not None]
 
     if not total_vals:
         return None
@@ -155,6 +163,12 @@ def ensure_verified_result(session, group_key: Tuple[str, str, str, datetime], v
     ok_majority = sum(1 for v in oks if v) >= (len(oks) // 2 + 1)
     total_median = int(median(total_vals))
     ttfb_median: int | None = int(median(ttfb_vals)) if ttfb_vals else None
+    reason_majority: str | None = None
+    http_status_majority: int | None = None
+    if reason_vals:
+        reason_majority = Counter(reason_vals).most_common(1)[0][0]
+    if status_vals:
+        http_status_majority = int(Counter(status_vals).most_common(1)[0][0])
 
     vr = VerifiedResult(
         verified_result_id=gen_id("vr"),
@@ -165,6 +179,8 @@ def ensure_verified_result(session, group_key: Tuple[str, str, str, datetime], v
         ok=ok_majority,
         total_ms_median=total_median,
         ttfb_ms_median=ttfb_median,
+        reason_code_majority=reason_majority,
+        http_status_majority=http_status_majority,
     )
     session.add(vr)
     session.flush()

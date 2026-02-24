@@ -94,6 +94,8 @@ class VerifiedResult(Base):
     ok: Mapped[bool] = mapped_column(Boolean)
     total_ms_median: Mapped[int] = mapped_column(Integer)
     ttfb_ms_median: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reason_code_majority: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    http_status_majority: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     target = relationship("Target")

@@ -22,6 +22,8 @@ class VerifiedResultOut(BaseModel):
     ok: bool
     total_ms_median: int
     ttfb_ms_median: Optional[int]
+    reason_code_majority: Optional[str]
+    http_status_majority: Optional[int]
 
     class Config:
         orm_mode = True
