@@ -85,11 +85,12 @@ def fetch_jobs(
     node: Node = Depends(get_current_node),
     db: Session = Depends(get_db),
 ):
-    # Claim unassigned jobs using SKIP LOCKED.
+    # Claim unassigned, not-yet-expired jobs using SKIP LOCKED.
     stmt = (
         select(Job)
         .where(Job.node_id.is_(None))
-        .order_by(Job.issued_at.asc())
+        .where(Job.expires_at > datetime.utcnow())
+        .order_by(Job.issued_at.desc())
         .with_for_update(skip_locked=True)
         .limit(limit)
     )

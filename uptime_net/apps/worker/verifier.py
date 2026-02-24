@@ -10,14 +10,11 @@ from typing import Dict, List, Tuple
 from sqlalchemy import select
 
 import os
-import sys
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "api"))
-
-from app.core.config import get_settings  # type: ignore  # noqa: E402
-from app.core.security import gen_id  # type: ignore  # noqa: E402
-from app.db import make_engine, make_session_factory  # type: ignore  # noqa: E402
-from app.models import (  # type: ignore  # noqa: E402
+from app.core.config import get_settings
+from app.core.security import gen_id
+from app.db import make_engine, make_session_factory
+from app.models import (
     Incident,
     Job,
     Receipt,

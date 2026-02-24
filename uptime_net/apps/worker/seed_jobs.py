@@ -7,14 +7,9 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-# Add shared package to path when running as script
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "packages", "shared"))
-
 from shared.canonical_json import canonical_dumps, strip_keys_deep
 from shared.ed25519 import sign_bytes
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "api"))
 from app.core.config import get_settings
 from app.core.keys import get_or_create_server_sk_b64
 from app.core.security import gen_id

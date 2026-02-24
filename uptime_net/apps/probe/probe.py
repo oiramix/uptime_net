@@ -11,9 +11,6 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "packages", "shared"))
-
 from shared.canonical_json import canonical_dumps, strip_keys_deep
 from shared.ed25519 import generate_keypair, sign_bytes, verify_bytes
 
